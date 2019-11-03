@@ -62,12 +62,14 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
             final EventChannel eventChannel =
                     new EventChannel(registrar.messenger(), "flutter_barcode_scanner_receiver");
             eventChannel.setStreamHandler(instance);
+        Log.d(TAG, "channel registered - valubarcode");
     }
 
     @Override
     public void onMethodCall(MethodCall call, Result result) {
         try {
             pendingResult = result;
+            Log.d(TAG, "method call - valubarcode");
 
             if (call.method.equals("scanBarcode")) {
                 if (!(call.arguments instanceof Map)) {
