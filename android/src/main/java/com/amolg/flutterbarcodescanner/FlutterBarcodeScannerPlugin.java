@@ -54,8 +54,7 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
      * Plugin registration.
      */
     public static void registerWith(PluginRegistry.Registrar registrar) {
-        if (instance == null) {
-            final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
+         final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
             instance = new FlutterBarcodeScannerPlugin((FlutterActivity) registrar.activity());
             registrar.addActivityResultListener(instance);
             channel.setMethodCallHandler(instance);
@@ -63,7 +62,6 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
             final EventChannel eventChannel =
                     new EventChannel(registrar.messenger(), "flutter_barcode_scanner_receiver");
             eventChannel.setStreamHandler(instance);
-        }
     }
 
     @Override
