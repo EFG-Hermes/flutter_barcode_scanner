@@ -1,3 +1,36 @@
+## 0.1.7
+
+* Enhancement: Issue #14, Added separate graphics overlay for Barcode and QR code.
+
+## 0.1.6
+
+* Android: Issue #31 fix (Out of memory crash).
+* iOS: Issue #34 fix (Flash icon mismatch).
+
+## 0.1.5+2
+
+* iOS: No response on cancel button click (Fixes issue #33).
+
+## 0.1.5+1
+
+* Android: Potential issue fix Unhandled Exception: MissingPluginException.
+
+## 0.1.5
+
+* iOS: Camera permission issue fix (fixes issue #24).
+
+## 0.1.4
+
+* iOS: Added check for camera permission. Ask user to grant camera permission.
+
+## 0.1.3
+
+* Android: Continuous scan not working issue fix.
+
+## 0.1.2+1
+
+* iOS: Added support for ARGB color code which was not supported earlier.
+
 ## 0.1.2
 
 * iOS: flash icon not visible for some devices issue fix.

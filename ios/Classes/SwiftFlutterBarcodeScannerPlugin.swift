@@ -2,8 +2,17 @@ import Flutter
 import UIKit
 import AVFoundation
 
-public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarcodeDelegate,FlutterStreamHandler {
+enum ScanMode:Int{
+    case QR
+    case BARCODE
+    case DEFAULT
     
+    var index: Int {
+        return rawValue
+    }
+}
+
+public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarcodeDelegate,FlutterStreamHandler {
     
     public static var viewController = UIViewController()
     public static var lineColor:String=""
@@ -12,6 +21,7 @@ public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarc
     var pendingResult:FlutterResult!
     public static var isContinuousScan:Bool=false
     static var barcodeStream:FlutterEventSink?=nil
+    public static var scanMode = ScanMode.QR.index;
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         viewController = (UIApplication.shared.delegate?.window??.rootViewController)!
@@ -22,6 +32,14 @@ public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarc
         eventChannel.setStreamHandler(instance)
     }
     
+    /// Check for camera availability
+    func checkCameraAvailability()->Bool{
+        return UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
+    
+    func checkForCameraPermission()->Bool{
+        return AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+    }
     
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
         SwiftFlutterBarcodeScannerPlugin.barcodeStream = events
@@ -37,10 +55,8 @@ public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarc
         barcodeStream!(barcode)
     }
     
-    
-    
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        var args:Dictionary<String, AnyObject> = call.arguments as! Dictionary<String, AnyObject>;
+        let args:Dictionary<String, AnyObject> = call.arguments as! Dictionary<String, AnyObject>;
         if let colorCode = args["lineColor"] as? String{
             SwiftFlutterBarcodeScannerPlugin.lineColor = colorCode
         }else {
@@ -62,17 +78,66 @@ public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarc
             SwiftFlutterBarcodeScannerPlugin.isContinuousScan = false
         }
         
+        if let scanModeReceived = args["scanMode"] as? Int {
+            if scanModeReceived == ScanMode.DEFAULT.index {
+                SwiftFlutterBarcodeScannerPlugin.scanMode = ScanMode.QR.index
+            }else{
+                SwiftFlutterBarcodeScannerPlugin.scanMode = scanModeReceived
+            }
+        }else{
+            SwiftFlutterBarcodeScannerPlugin.scanMode = ScanMode.QR.index
+        }
+        
         pendingResult=result
         let controller = BarcodeScannerViewController()
         controller.delegate = self
-        SwiftFlutterBarcodeScannerPlugin.viewController.present(controller
-        , animated: true) {
-            
+        
+        if #available(iOS 13.0, *) {
+            controller.modalPresentationStyle = .fullScreen
+        }
+        
+        if checkCameraAvailability(){
+            if checkForCameraPermission() {
+                SwiftFlutterBarcodeScannerPlugin.viewController.present(controller
+                , animated: true) {
+                    
+                }
+            }else {
+                AVCaptureDevice.requestAccess(for: .video) { success in
+                    DispatchQueue.main.async {
+                        if success {
+                            SwiftFlutterBarcodeScannerPlugin.viewController.present(controller
+                            , animated: true) {
+                                
+                            }
+                        } else {
+                            let alert = UIAlertController(title: "Action needed", message: "Please grant camera permission to use barcode scanner", preferredStyle: .alert)
+                            
+                            alert.addAction(UIAlertAction(title: "Grant", style: .default, handler: { action in
+                                UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                            }))
+                            
+                            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                            
+                            SwiftFlutterBarcodeScannerPlugin.viewController.present(alert, animated: true)
+                        }
+                    }
+                }}
+        }else {
+            showAlertDialog(title: "Unable to proceed", message: "Camera not available")
         }
     }
     
     public func userDidScanWith(barcode: String){
         pendingResult(barcode)
+    }
+    
+    /// Show common alert dialog
+    func showAlertDialog(title:String,message:String){
+        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        let alertAction = UIAlertAction(title: "Ok", style: .default, handler: nil)
+        alertController.addAction(alertAction)
+        SwiftFlutterBarcodeScannerPlugin.viewController.present(alertController, animated: true, completion: nil)
     }
 }
 
@@ -107,7 +172,7 @@ class BarcodeScannerViewController: UIViewController {
     private lazy var xCor: CGFloat! = {
         return (screenSize.width - (screenSize.width*0.8))/2
     }()
-    private lazy var yCor: CGFloat! = {
+    private lazy var yCor: CGFloat! = {    
         return (screenSize.height - (screenSize.width*0.8))/2
     }()
     //Bottom view
@@ -118,24 +183,25 @@ class BarcodeScannerViewController: UIViewController {
         return view
     }()
     
+    /// Create and return flash button
     private lazy var flashIcon : UIButton! = {
         let flashButton = UIButton()
         flashButton.setTitle("Flash",for:.normal)
         flashButton.translatesAutoresizingMaskIntoConstraints=false
         
-        flashButton.setImage(UIImage(named: "ic_flash_on", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil),for:.normal)
+        flashButton.setImage(UIImage(named: "ic_flash_off", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil),for:.normal)
         
         flashButton.addTarget(self, action: #selector(BarcodeScannerViewController.flashButtonClicked), for: .touchUpInside)
         return flashButton
     }()
     
     
-    
+    /// Create and return cancel button
     public lazy var cancelButton: UIButton! = {
         let view = UIButton()
         view.setTitle(SwiftFlutterBarcodeScannerPlugin.cancelButtonText, for: .normal)
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.addTarget(self, action: #selector(BarcodeScannerViewController.playButtonClicked), for: .touchUpInside)
+        view.addTarget(self, action: #selector(BarcodeScannerViewController.cancelButtonClicked), for: .touchUpInside)
         return view
     }()
     
@@ -149,7 +215,7 @@ class BarcodeScannerViewController: UIViewController {
             print("Failed to get the camera device")
             return
         }
-        
+        let screenHeight = (SwiftFlutterBarcodeScannerPlugin.scanMode == ScanMode.QR.index) ? (screenSize.width * 0.8) : (screenSize.width * 0.5)
         do {
             // Get an instance of the AVCaptureDeviceInput class using the previous device object.
             let input = try AVCaptureDeviceInput(device: captureDevice)
@@ -160,7 +226,7 @@ class BarcodeScannerViewController: UIViewController {
             }
             // Initialize a AVCaptureMetadataOutput object and set it as the output device to the capture session.
             
-            captureMetadataOutput.rectOfInterest = CGRect(x: xCor, y: yCor, width: (screenSize.width*0.8), height: (screenSize.width*0.8))
+            captureMetadataOutput.rectOfInterest = CGRect(x: xCor, y: yCor, width: (screenSize.width*0.8), height: screenHeight)
             if captureSession.outputs.isEmpty {
                 captureSession.addOutput(captureMetadataOutput)
             }
@@ -181,7 +247,7 @@ class BarcodeScannerViewController: UIViewController {
         
         let overlayPath = UIBezierPath(rect: view.bounds)
         
-        let transparentPath = UIBezierPath(rect: CGRect(x: xCor, y: yCor, width: (screenSize.width*0.8), height: (screenSize.width*0.8)))
+        let transparentPath = UIBezierPath(rect: CGRect(x: xCor, y: yCor, width: (screenSize.width*0.8), height: screenHeight))
         overlayPath.append(transparentPath)
         overlayPath.usesEvenOddFillRule = true
         let fillLayer = CAShapeLayer()
@@ -195,14 +261,16 @@ class BarcodeScannerViewController: UIViewController {
         
         // Start video capture.
         captureSession.startRunning()
-        let scanRect = CGRect(x: xCor, y: yCor, width: (screenSize.width*0.8), height: (screenSize.width*0.8))
+        
+        let scanRect = CGRect(x: xCor, y: yCor, width: (screenSize.width*0.8), height: screenHeight)
         let rectOfInterest = videoPreviewLayer?.metadataOutputRectConverted(fromLayerRect: scanRect)
         if let rOI = rectOfInterest{
             captureMetadataOutput.rectOfInterest = rOI
         }
         // Initialize QR Code Frame to highlight the QR code
         qrCodeFrameView = UIView()
-        qrCodeFrameView!.frame = CGRect(x: 0, y: 0, width: (screenSize.width), height: (screenSize.width))
+        
+        qrCodeFrameView!.frame = CGRect(x: 0, y: 0, width: (screenSize.width), height: screenHeight)
         
         if let qrCodeFrameView = qrCodeFrameView {
             self.view.addSubview(qrCodeFrameView)
@@ -225,6 +293,7 @@ class BarcodeScannerViewController: UIViewController {
         self.moveVertically()
     }
     
+    /// Apply constraints to ui components
     private func setConstraintsForControls() {
         self.view.addSubview(bottomView)
         self.view.addSubview(cancelButton)
@@ -248,19 +317,21 @@ class BarcodeScannerViewController: UIViewController {
         
     }
     
+    /// Flash button click event listener
     @IBAction private func flashButtonClicked() {
         if #available(iOS 10.0, *) {
-            if flashIcon.image(for: .normal) == UIImage(named: "ic_flash_on", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil){
-                flashIcon.setImage(UIImage(named: "ic_flash_off", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil),for:.normal)
-                
-            }else{
+            if flashIcon.image(for: .normal) == UIImage(named: "ic_flash_off", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil){
                 flashIcon.setImage(UIImage(named: "ic_flash_on", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil),for:.normal)
+            }else{
+                flashIcon.setImage(UIImage(named: "ic_flash_off", in: Bundle(identifier: "org.cocoapods.flutter-barcode-scanner"), compatibleWith: nil),for:.normal)
             }
             toggleFlash()
         } else {
-            
+            /// Handle further checks
         }
     }
+    
+    /// Toggle flash and change flash icon
     func toggleFlash() {
         guard let device = AVCaptureDevice.default(for: AVMediaType.video) else { return }
         guard device.hasTorch else { return }
@@ -284,24 +355,36 @@ class BarcodeScannerViewController: UIViewController {
         }
     }
     
-    @IBAction private func playButtonClicked() {
-        if #available(iOS 10.0, *) {
-            self.dismiss(animated: true) {
-            }
-        } else {
-            self.dismiss(animated: true) {
+    
+    /// Cancel button click event listener
+    @IBAction private func cancelButtonClicked() {
+        if SwiftFlutterBarcodeScannerPlugin.isContinuousScan{
+            self.dismiss(animated: true, completion: {
+                SwiftFlutterBarcodeScannerPlugin.onBarcodeScanReceiver(barcode: "-1")
+            })
+        }else{
+            if self.delegate != nil {
+                self.dismiss(animated: true, completion: {
+                    self.delegate?.userDidScanWith(barcode: "-1")
+                })
             }
         }
     }
     
+    /// Draw scan line
     private func drawLine() {
         self.view.addSubview(scanLine)
         scanLine.backgroundColor = hexStringToUIColor(hex: SwiftFlutterBarcodeScannerPlugin.lineColor) // green color
         scanlineRect = CGRect(x: xCor, y: yCor, width:(screenSize.width*0.8), height: 2)
         scanlineStartY = yCor
-        scanlineStopY = yCor + (screenSize.width*0.8)
+        scanlineStopY = (SwiftFlutterBarcodeScannerPlugin.scanMode == ScanMode.QR.index ? (yCor + (screenSize.width*0.8)) : (yCor + screenSize.width * 0.5))
+        
+        //  return (SwiftFlutterBarcodeScannerPlugin.scanMode == ScanMode.QR.index) ? (screenSize.height) : (screenSize.height / 2)
+        //        scanlineStopY = yCor + (screenSize.width*0.8)
     }
     
+    
+    /// Animate scan line vertically
     private func moveVertically() {
         scanLine.frame  = scanlineRect
         scanLine.center = CGPoint(x: scanLine.center.x, y: scanlineStartY)
@@ -313,7 +396,6 @@ class BarcodeScannerViewController: UIViewController {
     }
     
     
-    // MARK: - Helper methods
     private func launchApp(decodedURL: String) {
         if presentedViewController != nil {
             return
@@ -326,6 +408,7 @@ class BarcodeScannerViewController: UIViewController {
     }
 }
 
+/// Extension for view controller
 extension BarcodeScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
     public func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
         // Check if the metadataObjects array is not nil and it contains at least one object.
@@ -350,6 +433,7 @@ extension BarcodeScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
     }
 }
 
+/// Convert hex string to UIColor
 func hexStringToUIColor (hex:String) -> UIColor {
     var cString:String = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     
@@ -357,17 +441,29 @@ func hexStringToUIColor (hex:String) -> UIColor {
         cString.remove(at: cString.startIndex)
     }
     
-    if ((cString.count) != 6) {
+    if ((cString.count) != 6 && (cString.count) != 8) {
         return UIColor.gray
     }
-    var rgbValue:UInt32 = 0
-    Scanner(string: cString).scanHexInt32(&rgbValue)
     
+    var rgbaValue:UInt32 = 0
+    
+    if (!Scanner(string: cString).scanHexInt32(&rgbaValue)) {
+        return UIColor.gray
+    }
+    
+    var aValue:CGFloat = 1.0
+    if ((cString.count) == 8) {
+        aValue = CGFloat((rgbaValue & 0xFF000000) >> 24) / 255.0
+    }
+    
+    let rValue:CGFloat = CGFloat((rgbaValue & 0x00FF0000) >> 16) / 255.0
+    let gValue:CGFloat = CGFloat((rgbaValue & 0x0000FF00) >> 8) / 255.0
+    let bValue:CGFloat = CGFloat(rgbaValue & 0x000000FF) / 255.0
     
     return UIColor(
-        red: CGFloat((rgbValue & 0xFF0000) >> 16) / 255.0,
-        green: CGFloat((rgbValue & 0x00FF00) >> 8) / 255.0,
-        blue: CGFloat(rgbValue & 0x0000FF) / 255.0,
-        alpha: CGFloat(1.0)
+        red: rValue,
+        green: gValue,
+        blue: bValue,
+        alpha: aValue
     )
 }

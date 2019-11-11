@@ -3,12 +3,16 @@ package com.amolg.flutterbarcodescanner;
 import android.Manifest;
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
+
+import androidx.annotation.NonNull;
 
 import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.vision.barcode.Barcode;
@@ -34,7 +38,7 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
     private static final int REQUEST_CODE_CAMERA_PERMISSION = 3777;
     private static FlutterBarcodeScannerPlugin instance;
 
-    private FlutterActivity activity;
+    private static FlutterActivity activity;
     private static Result pendingResult;
     private Map<String, Object> arguments;
     private boolean executeAfterPermissionGranted;
@@ -45,31 +49,77 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
     public static boolean isShowFlashIcon = false;
     public static boolean isContinuousScan = false;
     static EventChannel.EventSink barcodeStream;
+    private Application.ActivityLifecycleCallbacks activityLifecycleCallbacks;
+    private final PluginRegistry.Registrar registrar;
 
-    public FlutterBarcodeScannerPlugin(FlutterActivity activity) {
-        this.activity = activity;
+    private FlutterBarcodeScannerPlugin(FlutterActivity activity, final PluginRegistry.Registrar registrar) {
+        FlutterBarcodeScannerPlugin.activity = activity;
+        this.registrar = registrar;
+
+        activityLifecycleCallbacks =
+                new Application.ActivityLifecycleCallbacks() {
+                    @Override
+                    public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
+                    }
+
+                    @Override
+                    public void onActivityStarted(Activity activity) {
+                    }
+
+                    @Override
+                    public void onActivityResumed(Activity activity) {
+                    }
+
+                    @Override
+                    public void onActivityPaused(Activity activity) {
+                    }
+
+                    @Override
+                    public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
+                        if (activity == registrar.activity()) {
+                            // TODO
+                        }
+                    }
+
+                    @Override
+                    public void onActivityDestroyed(Activity activity) {
+                        if (activity == registrar.activity()) {
+                            ((Application) registrar.context()).unregisterActivityLifecycleCallbacks(this);
+                        }
+                    }
+
+                    @Override
+                    public void onActivityStopped(Activity activity) {
+                    }
+                };
+
+        if (this.registrar != null) {
+            ((Application) this.registrar.context())
+                    .registerActivityLifecycleCallbacks(activityLifecycleCallbacks);
+        }
     }
 
     /**
      * Plugin registration.
      */
-    public static void registerWith(PluginRegistry.Registrar registrar) {
-         final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
-            instance = new FlutterBarcodeScannerPlugin((FlutterActivity) registrar.activity());
-            registrar.addActivityResultListener(instance);
-            channel.setMethodCallHandler(instance);
+    public static void registerWith(final PluginRegistry.Registrar registrar) {
+        if (registrar.activity() == null) {
+            return;
+        }
+        final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
+        instance = new FlutterBarcodeScannerPlugin((FlutterActivity) registrar.activity(), registrar);
+        registrar.addActivityResultListener(instance);
+        channel.setMethodCallHandler(instance);
 
-            final EventChannel eventChannel =
-                    new EventChannel(registrar.messenger(), "flutter_barcode_scanner_receiver");
-            eventChannel.setStreamHandler(instance);
-        Log.d(TAG, "channel registered - valubarcode");
+        final EventChannel eventChannel =
+                new EventChannel(registrar.messenger(), "flutter_barcode_scanner_receiver");
+        eventChannel.setStreamHandler(instance);
     }
 
     @Override
-    public void onMethodCall(MethodCall call, Result result) {
+    public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
         try {
             pendingResult = result;
-            Log.d(TAG, "method call - valubarcode");
 
             if (call.method.equals("scanBarcode")) {
                 if (!(call.arguments instanceof Map)) {
@@ -81,6 +131,16 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
                 if (null == lineColor || lineColor.equalsIgnoreCase("")) {
                     lineColor = "#DC143C";
                 }
+                if (null != arguments.get("scanMode")) {
+                    if ((int) arguments.get("scanMode") == BarcodeCaptureActivity.SCAN_MODE_ENUM.DEFAULT.ordinal()) {
+                        BarcodeCaptureActivity.SCAN_MODE = BarcodeCaptureActivity.SCAN_MODE_ENUM.QR.ordinal();
+                    } else {
+                        BarcodeCaptureActivity.SCAN_MODE = (int) arguments.get("scanMode");
+                    }
+                } else {
+                    BarcodeCaptureActivity.SCAN_MODE = BarcodeCaptureActivity.SCAN_MODE_ENUM.QR.ordinal();
+                }
+
                 isContinuousScan = (boolean) arguments.get("isContinuousScan");
 
                 startBarcodeScannerActivityView((String) arguments.get("cancelButtonText"), isContinuousScan);
@@ -122,16 +182,16 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
                         String barcodeResult = barcode.displayValue;
                         pendingResult.success(barcodeResult);
                     } catch (Exception e) {
-                        pendingResult.success("");
+                        pendingResult.success("-1");
                     }
                 } else {
-                    pendingResult.success("");
+                    pendingResult.success("-1");
                 }
                 pendingResult = null;
                 arguments = null;
                 return true;
             } else {
-                pendingResult.success("");
+                pendingResult.success("-1");
             }
         }
         return false;
@@ -160,13 +220,18 @@ public class FlutterBarcodeScannerPlugin implements MethodCallHandler, ActivityR
      *
      * @param barcode
      */
-    public static void onBarcodeScanReceiver(Barcode barcode) {
+    public static void onBarcodeScanReceiver(final Barcode barcode) {
         try {
             if (barcode != null && !barcode.displayValue.isEmpty()) {
-                barcodeStream.success(barcode.displayValue);
+                activity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        barcodeStream.success(barcode.displayValue);
+                    }
+                });
             }
         } catch (Exception e) {
-
+            Log.e(TAG, "onBarcodeScanReceiver: " + e.getLocalizedMessage());
         }
     }
 }
